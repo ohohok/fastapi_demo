@@ -64,18 +64,33 @@ jobs:
         
         # 获取 GitHub Variables
         PROJECT_NAME="fastapi_demo"
-        APP_PATH="${{ vars.APP_PATH }}"
-        SERVER_HOST="${{ vars.SERVER_HOST }}"
-        SERVER_USER="${{ vars.SERVER_USER }}"
+        APP_PATH="${{ variables.APP_PATH }}"
+        SERVER_HOST="${{ variables.SERVER_HOST }}"
+        SERVER_USER="${{ variables.SERVER_USER }}"
+        DEPLOY_KEY="${{ secrets.DEPLOY_KEY }}"
+        
+        # 验证必要的变量是否存在
+        if [ -z "$SERVER_HOST" ] || [ -z "$SERVER_USER" ] || [ -z "$APP_PATH" ]; then
+          echo "Error: Missing required variables"
+          echo "SERVER_HOST: $SERVER_HOST"
+          echo "SERVER_USER: $SERVER_USER"
+          echo "APP_PATH: $APP_PATH"
+          exit 1
+        fi
+        
+        if [ -z "$DEPLOY_KEY" ]; then
+          echo "Error: DEPLOY_KEY secret is not set"
+          exit 1
+        fi
         
         # 配置 SSH
         mkdir -p ~/.ssh
-        echo "${{ secrets.DEPLOY_KEY }}" > ~/.ssh/deploy_key
+        echo "$DEPLOY_KEY" > ~/.ssh/deploy_key
         chmod 600 ~/.ssh/deploy_key
-        ssh-keyscan -H $SERVER_HOST >> ~/.ssh/known_hosts 2>/dev/null || true
+        ssh-keyscan -H "$SERVER_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
         
         # 使用 SSH 执行部署命令
-        ssh -i ~/.ssh/deploy_key $SERVER_USER@$SERVER_HOST "
+        ssh -i ~/.ssh/deploy_key "$SERVER_USER@$SERVER_HOST" "
           # 进入应用目录
           cd $APP_PATH &&
           
