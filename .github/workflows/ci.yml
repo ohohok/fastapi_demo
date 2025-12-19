@@ -64,9 +64,9 @@ jobs:
         
         # 获取 GitHub Variables
         PROJECT_NAME="fastapi_demo"
-        APP_PATH="${{ variables.APP_PATH }}"
-        SERVER_HOST="${{ variables.SERVER_HOST }}"
-        SERVER_USER="${{ variables.SERVER_USER }}"
+        APP_PATH="${{ vars.APP_PATH }}"
+        SERVER_HOST="${{ vars.SERVER_HOST }}"
+        SERVER_USER="${{ vars.SERVER_USER }}"
         DEPLOY_KEY="${{ secrets.DEPLOY_KEY }}"
         
         # 验证必要的变量是否存在
@@ -78,26 +78,57 @@ jobs:
           exit 1
         fi
         
-        if [ -z "$DEPLOY_KEY" ]; then
-          echo "Error: DEPLOY_KEY secret is not set"
-          exit 1
-        fi
-        
         # 配置 SSH
         mkdir -p ~/.ssh
-        echo "$DEPLOY_KEY" > ~/.ssh/deploy_key
-        chmod 600 ~/.ssh/deploy_key
+        if [ -n "$DEPLOY_KEY" ]; then
+          echo "$DEPLOY_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          SSH_OPTIONS="-i ~/.ssh/deploy_key"
+        else
+          echo "Warning: No deploy key provided, using default SSH settings"
+          SSH_OPTIONS=""
+        fi
+        
         ssh-keyscan -H "$SERVER_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
         
         # 使用 SSH 执行部署命令
-        ssh -i ~/.ssh/deploy_key "$SERVER_USER@$SERVER_HOST" "
-          # 进入应用目录
-          cd $APP_PATH &&
-          
-          # 拉取最新代码
-          echo 'Fetching latest code...' &&
-          git fetch &&
-          git reset --hard origin/main &&
+        ssh -o StrictHostKeyChecking=no $SSH_OPTIONS "$SERVER_USER@$SERVER_HOST" "
+          # 检查应用目录是否存在，如果不存在则克隆仓库
+          if [ ! -d \"$APP_PATH\" ]; then
+            echo 'Application directory does not exist, creating directory and cloning repository...'
+            # 创建目录
+            mkdir -p \"$APP_PATH\" || {
+              echo 'Failed to create application directory'
+              exit 1
+            }
+            
+            # 进入目录并初始化git仓库
+            cd \"$APP_PATH\" || {
+              echo 'Failed to enter application directory'
+              exit 1
+            }
+            
+            # 初始化git并添加远程仓库
+            git init && \
+            git remote add origin https://github.com/${GITHUB_REPOSITORY}.git && \
+            git fetch origin && \
+            git checkout main && \
+            git reset --hard origin/main || {
+              echo 'Failed to initialize and clone repository'
+              exit 1
+            }
+          else
+            # 进入应用目录
+            cd \"$APP_PATH\" || {
+              echo 'Failed to enter application directory'
+              exit 1
+            }
+            
+            # 拉取最新代码
+            echo 'Fetching latest code...' &&
+            git fetch &&
+            git reset --hard origin/main
+          fi &&
           
           # 检查 tmux 会话是否存在
           if tmux has-session -t $PROJECT_NAME 2>/dev/null; then
