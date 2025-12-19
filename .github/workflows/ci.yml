@@ -53,7 +53,7 @@ jobs:
   deploy:
     needs: test
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    if: github.event_name == 'pull_request' && github.base_ref == 'main'
     
     steps:
     - uses: actions/checkout@v4
@@ -61,8 +61,62 @@ jobs:
     - name: Deploy to production
       run: |
         echo "Deploying to production..."
-        # 在这里添加部署命令
-        # 例如：scp, rsync 或调用部署 API
         
-        # 示例部署脚本：
-        # ssh user@your-server 'cd /path/to/app && git pull && systemctl restart your-app'
+        # 获取 GitHub Variables
+        PROJECT_NAME="fastapi_demo"
+        APP_PATH="${{ vars.APP_PATH }}"
+        SERVER_HOST="${{ vars.SERVER_HOST }}"
+        SERVER_USER="${{ vars.SERVER_USER }}"
+        
+        # 配置 SSH
+        mkdir -p ~/.ssh
+        echo "${{ secrets.DEPLOY_KEY }}" > ~/.ssh/deploy_key
+        chmod 600 ~/.ssh/deploy_key
+        ssh-keyscan -H $SERVER_HOST >> ~/.ssh/known_hosts 2>/dev/null || true
+        
+        # 使用 SSH 执行部署命令
+        ssh -i ~/.ssh/deploy_key $SERVER_USER@$SERVER_HOST "
+          # 进入应用目录
+          cd $APP_PATH &&
+          
+          # 拉取最新代码
+          echo 'Fetching latest code...' &&
+          git fetch &&
+          git reset --hard origin/main &&
+          
+          # 检查 tmux 会话是否存在
+          if tmux has-session -t $PROJECT_NAME 2>/dev/null; then
+            echo 'Session exists, restarting application...' &&
+            # 进入会话并杀死当前进程
+            tmux send-keys -t $PROJECT_NAME C-c &&
+            
+            # 等待进程结束
+            sleep 2 &&
+            
+            # 重启应用
+            tmux send-keys -t $PROJECT_NAME 'uv sync' Enter &&
+            tmux send-keys -t $PROJECT_NAME 'uv run python main.py' Enter &&
+            echo 'Application restarted in existing session: $PROJECT_NAME'
+          else
+            echo 'Session does not exist, creating new session...' &&
+            # 安装依赖并创建新会话
+            uv sync &&
+            # 创建新的 tmux 会话并启动应用
+            tmux new-session -d -s $PROJECT_NAME 'uv run python main.py' &&
+            echo 'New session created: $PROJECT_NAME'
+          fi &&
+          
+          # 等待应用启动
+          sleep 3 &&
+          # 显示 Python 进程信息以确认变更生效
+          if pgrep -f \"python main.py\" > /dev/null; then
+            echo 'Python process is running:' &&
+            pgrep -af \"python main.py\" &&
+            echo 'Application start time:' &&
+            ps -eo pid,lstart,cmd | grep \"python main.py\" | grep -v grep
+          else
+            echo 'Warning: Python process may not be running'
+          fi
+        "
+        
+        echo "Deployment completed successfully!"
